@@ -12,9 +12,11 @@ A Python script to manage a Raspberry Pi Official Touchscreen via MQTT, with pro
 - **Hardware Agnostic**: Supports both legacy (`rpi_backlight`) and new KMS (`panel_backlight@1`) display drivers.
 
 ## 📋 Prerequisites
-- Raspberry Pi with the **Official Touchscreen**.
+- Raspberry Pi with the **Official Raspberry Pi Touch Display 2**.
 - Raspberry Pi OS (Trixie).
 - Python 3.x.
+- Browser (I used Chromium)
+- Revolver Tab Rotator extension (Optional)
 
 ### Required Libraries
 ```bash
@@ -55,4 +57,51 @@ action:
             target:
               entity_id: light.pi_dashboard_screen
 mode: restart
+```
+
+## Installation
+
+Installation
+
+### 1. Clone the Repository
+```bash
+git clone [https://github.com/jinserra/rpi-kiosk-mqtt.git](https://github.com/jinserra/rpi-kiosk-mqtt.git)
+cd rpi-kiosk-mqtt
+```
+
+### Install Dependencies
+# Option A: Virtual Environment
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+# Option B: System-wide Installation
+```bash
+sudo pip3 install -r requirements.txt --break-system-packages
+```
+# Create a .env file from the example:
+```bash
+cp .env.example .env
+vi .env
+```
+# Configure your MQTT broker details and the correct BACKLIGHT_PATH.
+For Trixie/KMS drivers, use: /sys/class/backlight/panel_backlight@1
+
+# Setup the Systemd Service
+# Copy the included service file to the system directory:
+```bash
+sudo cp pi-screen.service /etc/systemd/system/
+```
+# Reload the daemon and enable the service:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable pi-screen.service
+sudo systemctl start pi-screen.service
+```
+
+# Verify service running
+```bash
+sudo journalctl -u pi-screen.service -f
 ```
