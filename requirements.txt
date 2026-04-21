@@ -1,0 +1,3 @@
+paho-mqtt
+rpi-backlight
+python-dotenv
