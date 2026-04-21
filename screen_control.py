@@ -10,9 +10,12 @@ from dotenv import load_dotenv
 # Load variables from .env file
 load_dotenv()
 
+# Configuration from environment variables
 MQTT_BROKER = os.getenv("MQTT_BROKER")
 MQTT_USER = os.getenv("MQTT_USER")
 MQTT_PASS = os.getenv("MQTT_PASS")
+BACKLIGHT_PATH = os.getenv("BACKLIGHT_PATH", "/sys/class/backlight/rpi_backlight")
+BROWSER_PROCESS = os.getenv("BROWSER_PROCESS", "chromium")
 
 # Topics
 BASE_TOPIC = "homeassistant/pi_screen"
@@ -25,32 +28,33 @@ AVAILABILITY_TOPIC = f"{BASE_TOPIC}/availability"
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-backlight = Backlight(backlight_sysfs_path='/sys/class/backlight/panel_backlight@1')
 
-def manage_chromium(state):
-    """
-    Suspends (STOP) or Resumes (CONT) Chromium processes.
-    STOP: Process stays in RAM but uses 0% CPU.
-    CONT: Process resumes exactly where it left off.
-    """
+# Initialize Backlight with custom path
+try:
+    backlight = Backlight(backlight_sysfs_path=BACKLIGHT_PATH)
+except Exception as e:
+    logging.error(f"Failed to initialize backlight at {BACKLIGHT_PATH}: {e}")
+    exit(1)
+
+def manage_browser(state):
+    """Suspends (STOP) or Resumes (CONT) the browser process."""
     try:
-        # Check if chromium is even running to avoid pkill errors
-        check = subprocess.run(["pgrep", "chromium"], capture_output=True)
+        # Check if browser is running
+        check = subprocess.run(["pgrep", BROWSER_PROCESS], capture_output=True)
         if check.returncode != 0:
-            logging.warning("Chromium not running; nothing to suspend/resume.")
             return
 
         if state.upper() == "ON":
-            logging.info("Sending SIGCONT to Chromium (Resuming)...")
-            subprocess.run(["pkill", "-CONT", "chromium"], check=False)
+            logging.info(f"Resuming {BROWSER_PROCESS}...")
+            subprocess.run(["pkill", "-CONT", BROWSER_PROCESS], check=False)
         else:
-            logging.info("Sending SIGSTOP to Chromium (Suspending)...")
-            subprocess.run(["pkill", "-STOP", "chromium"], check=False)
+            logging.info(f"Suspending {BROWSER_PROCESS}...")
+            subprocess.run(["pkill", "-STOP", BROWSER_PROCESS], check=False)
     except Exception as e:
-        logging.error(f"Error managing Chromium: {e}")
+        logging.error(f"Process management error: {e}")
 
 def send_discovery(client):
-    """Publishes the discovery payload to Home Assistant."""
+    """MQTT Discovery for Home Assistant."""
     config_payload = {
         "name": "Raspberry Pi Screen",
         "unique_id": "rpi_screen_001",
@@ -64,16 +68,14 @@ def send_discovery(client):
         "brightness_scale": 100,
         "device": {
             "identifiers": ["rpi_display_01"],
-            "name": "Pi Dashboard",
+            "name": "Pi Kiosk",
             "model": "Official Touchscreen",
             "manufacturer": "Raspberry Pi"
         }
     }
     client.publish(DISCOVERY_TOPIC, json.dumps(config_payload), retain=True)
-    logging.info("Discovery payload sent.")
 
 def update_ha_state(client):
-    """Syncs hardware state back to HA."""
     pwr = "ON" if backlight.power else "OFF"
     client.publish(STATE_TOPIC, pwr, retain=True)
     client.publish(BRIGHTNESS_STATE_TOPIC, backlight.brightness, retain=True)
@@ -93,36 +95,30 @@ def on_message(client, userdata, msg):
     try:
         if msg.topic == COMMAND_TOPIC:
             new_state = payload.upper()
-            # Toggle physical hardware
             backlight.power = (new_state == "ON")
-            # Toggle Chromium process
-            manage_chromium(new_state)
-            logging.info(f"System State: {new_state}")
-            
+            manage_browser(new_state)
+            logging.info(f"Screen Power: {new_state}")
         elif msg.topic == BRIGHTNESS_SET_TOPIC:
             val = int(float(payload))
             backlight.brightness = val
             logging.info(f"Brightness: {val}%")
-        
         update_ha_state(client)
     except Exception as e:
-        logging.error(f"Hardware/Process Error: {e}")
+        logging.error(f"Action error: {e}")
 
-# --- Initialize ---
+# --- Client Setup ---
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 client.username_pw_set(MQTT_USER, MQTT_PASS)
+
+# Last Will and Testament
 client.will_set(AVAILABILITY_TOPIC, "offline", retain=True)
 
 client.on_connect = on_connect
 client.on_message = on_message
 
-logging.info(f"Connecting to {MQTT_BROKER}...")
 client.connect(MQTT_BROKER, 1883, 60)
-
 try:
-    client.loop_forever() 
+    client.loop_forever()
 except KeyboardInterrupt:
-    # Safety: Always resume Chromium if the script is killed
-    subprocess.run(["pkill", "-CONT", "chromium"], check=False)
+    subprocess.run(["pkill", "-CONT", BROWSER_PROCESS], check=False)
     client.publish(AVAILABILITY_TOPIC, "offline", retain=True)
-    logging.info("Shutting down...")
