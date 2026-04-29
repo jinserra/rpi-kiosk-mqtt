@@ -1,0 +1,19 @@
+[Unit]
+Description=MQTT Pi Screen Control
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Set to the new folder so load_dotenv() finds the .env file
+WorkingDirectory=/home/pi/rpi-kiosk-mqtt
+# Run as root to ensure pkill and hardware access work perfectly
+User=root
+Group=root
+ExecStartPre=/bin/sleep 5
+# Updated path to the new script location
+ExecStart=/usr/bin/python3 -u /home/pi/rpi-kiosk-mqtt/screen_control.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
