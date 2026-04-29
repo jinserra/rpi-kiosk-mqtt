@@ -2,14 +2,16 @@
 A Python script to manage a Raspberry Pi Official Touchscreen via MQTT, with process suspension.
 
 ## 💡 Origin
-- Built a kisok to display a Home Assistant dashboard using available parts at home
-- Itterative improvements - Save resources by turning on/off the display based upon presense.
+- Built a kiosk to display a Home Assistant dashboard using available parts at home
+- Iterative improvements - Save resources by turning on/off the display based upon presence.
 - Rotate through multiple tabs, and suspend the browser when turning off the screen.
 
 ## 🌟 Features
 - **MQTT Backlight Control**: Turn the screen ON/OFF and adjust brightness (0-100%) via Home Assistant.
 - **Chromium Suspension**: Automatically sends `SIGSTOP` to Chromium when the screen is off to reduce CPU usage and heat, and `SIGCONT` to resume.
-- **Home Assistant Discovery**: Automatically adds the screen as a 'Light' entity via MQTT Discovery.
+- **Remote Browser Management**: Remotely force-restart the Chromium process directly from a Home Assistant button entity.
+- **OS Update Management**: Tracks pending `apt` updates via an MQTT sensor and allows applying them remotely via a Home Assistant button.
+- **Home Assistant Discovery**: Automatically adds the screen, update sensors, and restart buttons via MQTT Discovery (dynamically named based on your Pi's hostname).
 - **Hardware Agnostic**: Supports both legacy (`rpi_backlight`) and new KMS (`panel_backlight@1`) display drivers.
 
 ## 📋 Prerequisites
@@ -17,7 +19,7 @@ A Python script to manage a Raspberry Pi Official Touchscreen via MQTT, with pro
 - Raspberry Pi OS (Trixie).
 - Python 3.x.
 - Browser (I used Chromium)
-- Revolver Tab Rotator extension (Optional)
+- [Revolver Tab Rotator](https://chromewebstore.google.com/detail/revolver-tab-rotator/jocjflhaheogmbkdnbahnmeokeihpcdc) extension (Optional)
 
 ### Required Libraries
 paho-mqtt rpi-backlight python-dotenv
@@ -62,7 +64,7 @@ mode: restart
 
 ### 1. Clone the Repository
 ```bash
-git clone [https://github.com/jinserra/rpi-kiosk-mqtt.git](https://github.com/jinserra/rpi-kiosk-mqtt.git)
+git clone https://github.com/jinserra/rpi-kiosk-mqtt.git
 cd rpi-kiosk-mqtt
 ```
 
@@ -87,6 +89,10 @@ vi .env
 For Trixie/KMS drivers, use: /sys/class/backlight/panel_backlight@1
 
 ### 5. Setup the Systemd Service
+#### Open the service file and replace `YOUR_USERNAME` with your actual Pi username:
+```bash
+vi pi-screen.service
+```
 #### Copy the included service file to the system directory:
 ```bash
 sudo cp pi-screen.service /etc/systemd/system/
