@@ -78,7 +78,10 @@ class BrowserManager:
         # Clear Locks (Using absolute paths)
         config_dir = f"{self.home_dir}/.config/chromium"
         for lock_file in glob.glob(f"{config_dir}/Singleton*"):
-            os.unlink(lock_file)
+            try:
+                os.remove(lock_file)
+            except OSError as e:
+                logging.warning(f"Could not remove lock file {lock_file}: {e}")
         
         # Reset Preferences
         pref_path = f"{config_dir}/Default/Preferences"
@@ -148,74 +151,92 @@ class KioskController:
         
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.client.username_pw_set(MQTT_USER, MQTT_PASS)
-        self.client.on_connect = self.on_connect
-        self.client.on_message = self.on_message
-        
+
         self.switch_topic = f"homeassistant/switch/{DEVICE_NAME}"
         self.brightness_topic = f"homeassistant/number/{DEVICE_NAME}/brightness"
         self.restart_topic = f"homeassistant/button/{DEVICE_NAME}/browser_restart/set"
         self.update_topic = f"homeassistant/button/{DEVICE_NAME}/apply_updates/set"
+        self.availability_topic = f"homeassistant/{DEVICE_NAME}/availability"
+
+        # LWT must be set before connect so the broker knows what to publish on drop
+        self.client.will_set(self.availability_topic, "offline", retain=True)
+
+        self.client.on_connect = self.on_connect
+        self.client.on_message = self.on_message
 
     def send_discovery(self):
+        device = {"identifiers": [DEVICE_NAME], "name": DEVICE_NAME}
+
         # 1. Screen Switch Entity (Always Enabled)
         switch_config = {
-            "name": f"{DEVICE_NAME} Screen",
+            "name": "Screen",
+            "has_entity_name": True,
             "unique_id": f"{DEVICE_NAME}_screen",
             "command_topic": f"{self.switch_topic}/set",
             "state_topic": f"{self.switch_topic}/state",
-            "device": {"identifiers": [DEVICE_NAME], "name": DEVICE_NAME}
+            "availability_topic": self.availability_topic,
+            "device": device
         }
         self.client.publish(f"{self.switch_topic}/config", json.dumps(switch_config), retain=True)
 
         # 2. Screen Brightness Number Entity (Always Enabled)
         brightness_config = {
-            "name": f"{DEVICE_NAME} Screen Brightness",
+            "name": "Screen Brightness",
+            "has_entity_name": True,
             "unique_id": f"{DEVICE_NAME}_screen_brightness",
             "command_topic": f"{self.brightness_topic}/set",
             "state_topic": f"{self.brightness_topic}/state",
+            "availability_topic": self.availability_topic,
             "min": 0,
             "max": 100,
             "step": 1,
             "unit_of_measurement": "%",
             "icon": "mdi:brightness-6",
-            "device": {"identifiers": [DEVICE_NAME]}
+            "device": device
         }
         self.client.publish(f"{self.brightness_topic}/config", json.dumps(brightness_config), retain=True)
 
-        # 2. Browser Restart Feature
+        # 3. Browser Restart Feature
         if ENABLE_REMOTE_RESTART:
             button_config = {
-                "name": f"{DEVICE_NAME} Restart Browser",
+                "name": "Restart Browser",
+                "has_entity_name": True,
                 "unique_id": f"{DEVICE_NAME}_restart_browser",
                 "command_topic": self.restart_topic,
+                "availability_topic": self.availability_topic,
                 "icon": "mdi:web-refresh",
-                "device": {"identifiers": [DEVICE_NAME]}
+                "device": device
             }
             self.client.publish(f"homeassistant/button/{DEVICE_NAME}/browser_restart/config", json.dumps(button_config), retain=True)
 
-        # 3. OS Updates Feature
+        # 4. OS Updates Feature
         if ENABLE_OS_UPDATES:
             update_sensor = {
-                "name": f"{DEVICE_NAME} Pending Updates",
+                "name": "Pending Updates",
+                "has_entity_name": True,
                 "unique_id": f"{DEVICE_NAME}_updates",
                 "state_topic": f"homeassistant/sensor/{DEVICE_NAME}/updates",
+                "availability_topic": self.availability_topic,
                 "unit_of_measurement": "packages",
                 "icon": "mdi:package-up",
-                "device": {"identifiers": [DEVICE_NAME]}
+                "device": device
             }
             self.client.publish(f"homeassistant/sensor/{DEVICE_NAME}/updates/config", json.dumps(update_sensor), retain=True)
-            
+
             update_button = {
-                "name": f"{DEVICE_NAME} Apply Updates",
+                "name": "Apply Updates",
+                "has_entity_name": True,
                 "unique_id": f"{DEVICE_NAME}_apply_updates",
                 "command_topic": self.update_topic,
+                "availability_topic": self.availability_topic,
                 "icon": "mdi:cellphone-arrow-down",
-                "device": {"identifiers": [DEVICE_NAME]}
+                "device": device
             }
             self.client.publish(f"homeassistant/button/{DEVICE_NAME}/apply_updates/config", json.dumps(update_button), retain=True)
 
     def on_connect(self, client, userdata, flags, rc, properties=None):
         logging.info(f"Connected to MQTT as {DEVICE_NAME}")
+        client.publish(self.availability_topic, "online", retain=True)
         self.send_discovery()
         client.subscribe(f"{self.switch_topic}/set")
         client.subscribe(f"{self.brightness_topic}/set")
@@ -260,11 +281,17 @@ class KioskController:
             time.sleep(3600)
 
     def run(self):
-        self.client.connect(MQTT_BROKER, 1883, 60)
-        threading.Thread(target=self.browser.monitor_health, daemon=True).start()
-        if ENABLE_OS_UPDATES:
-            threading.Thread(target=self.update_loop, daemon=True).start()
-        self.client.loop_forever()
+        try:
+            self.client.connect(MQTT_BROKER, 1883, 60)
+            threading.Thread(target=self.browser.monitor_health, daemon=True).start()
+            if ENABLE_OS_UPDATES:
+                threading.Thread(target=self.update_loop, daemon=True).start()
+            self.client.loop_forever()
+        except KeyboardInterrupt:
+            logging.info("Shutting down cleanly...")
+        finally:
+            self.client.publish(self.availability_topic, "offline", retain=True)
+            self.client.disconnect()
 
 if __name__ == "__main__":
     KioskController().run()
