@@ -151,22 +151,36 @@ class KioskController:
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
         
-        self.base_topic = f"homeassistant/light/{DEVICE_NAME}"
+        self.switch_topic = f"homeassistant/switch/{DEVICE_NAME}"
+        self.brightness_topic = f"homeassistant/number/{DEVICE_NAME}/brightness"
         self.restart_topic = f"homeassistant/button/{DEVICE_NAME}/browser_restart/set"
         self.update_topic = f"homeassistant/button/{DEVICE_NAME}/apply_updates/set"
 
     def send_discovery(self):
-        # 1. Screen Light Entity (Always Enabled)
-        config = {
+        # 1. Screen Switch Entity (Always Enabled)
+        switch_config = {
             "name": f"{DEVICE_NAME} Screen",
             "unique_id": f"{DEVICE_NAME}_screen",
-            "command_topic": f"{self.base_topic}/set",
-            "state_topic": f"{self.base_topic}/state",
-            "brightness_command_topic": f"{self.base_topic}/brightness/set",
-            "brightness_state_topic": f"{self.base_topic}/brightness/state",
+            "command_topic": f"{self.switch_topic}/set",
+            "state_topic": f"{self.switch_topic}/state",
             "device": {"identifiers": [DEVICE_NAME], "name": DEVICE_NAME}
         }
-        self.client.publish(f"{self.base_topic}/config", json.dumps(config), retain=True)
+        self.client.publish(f"{self.switch_topic}/config", json.dumps(switch_config), retain=True)
+
+        # 2. Screen Brightness Number Entity (Always Enabled)
+        brightness_config = {
+            "name": f"{DEVICE_NAME} Screen Brightness",
+            "unique_id": f"{DEVICE_NAME}_screen_brightness",
+            "command_topic": f"{self.brightness_topic}/set",
+            "state_topic": f"{self.brightness_topic}/state",
+            "min": 0,
+            "max": 100,
+            "step": 1,
+            "unit_of_measurement": "%",
+            "icon": "mdi:brightness-6",
+            "device": {"identifiers": [DEVICE_NAME]}
+        }
+        self.client.publish(f"{self.brightness_topic}/config", json.dumps(brightness_config), retain=True)
 
         # 2. Browser Restart Feature
         if ENABLE_REMOTE_RESTART:
@@ -203,7 +217,8 @@ class KioskController:
     def on_connect(self, client, userdata, flags, rc, properties=None):
         logging.info(f"Connected to MQTT as {DEVICE_NAME}")
         self.send_discovery()
-        client.subscribe(f"{self.base_topic}/#")
+        client.subscribe(f"{self.switch_topic}/set")
+        client.subscribe(f"{self.brightness_topic}/set")
         if ENABLE_REMOTE_RESTART:
             client.subscribe(self.restart_topic)
         if ENABLE_OS_UPDATES:
@@ -213,18 +228,18 @@ class KioskController:
         payload = msg.payload.decode()
 
         # Handle Screen Power
-        if msg.topic == f"{self.base_topic}/set":
+        if msg.topic == f"{self.switch_topic}/set":
             is_on = (payload.upper() == "ON")
             self.backlight.power = is_on
             self.browser.manage_state(payload.upper())
-            client.publish(f"{self.base_topic}/state", payload.upper(), retain=True)
+            client.publish(f"{self.switch_topic}/state", payload.upper(), retain=True)
 
         # Handle Brightness
-        elif msg.topic == f"{self.base_topic}/brightness/set":
+        elif msg.topic == f"{self.brightness_topic}/set":
             try:
                 brightness = max(0, min(100, int(payload)))
                 self.backlight.brightness = brightness
-                client.publish(f"{self.base_topic}/brightness/state", brightness, retain=True)
+                client.publish(f"{self.brightness_topic}/state", brightness, retain=True)
             except ValueError:
                 logging.warning(f"Invalid brightness value: {payload}")
 

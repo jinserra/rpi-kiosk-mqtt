@@ -7,11 +7,12 @@ A Python script to manage a Raspberry Pi Official Touchscreen via MQTT, with pro
 - Rotate through multiple tabs, and suspend the browser when turning off the screen.
 
 ## 🌟 Features
-- **MQTT Backlight Control**: Turn the screen ON/OFF and adjust brightness (0-100%) via Home Assistant.
+- **MQTT Screen Control**: Turn the screen ON/OFF via a `switch` entity in Home Assistant.
+- **Brightness Control**: Adjust brightness (0-100%) via a dedicated `number` entity.
 - **Chromium Suspension**: Automatically sends `SIGSTOP` to Chromium when the screen is off to reduce CPU usage and heat, and `SIGCONT` to resume.
 - **Remote Browser Management**: Remotely force-restart the Chromium process directly from a Home Assistant button entity.
 - **OS Update Management**: Tracks pending `apt` updates via an MQTT sensor and allows applying them remotely via a Home Assistant button.
-- **Home Assistant Discovery**: Automatically adds the screen, update sensors, and restart buttons via MQTT Discovery (dynamically named based on your Pi's hostname).
+- **Home Assistant Discovery**: Automatically adds all entities via MQTT Discovery, dynamically named based on your Pi's hostname.
 - **Hardware Agnostic**: Supports both legacy (`rpi_backlight`) and new KMS (`panel_backlight@1`) display drivers.
 
 ## 📋 Prerequisites
@@ -23,6 +24,19 @@ A Python script to manage a Raspberry Pi Official Touchscreen via MQTT, with pro
 
 ### Required Libraries
 paho-mqtt rpi-backlight python-dotenv
+
+## 🏠 Home Assistant Entities
+The following entities are automatically created via MQTT Discovery:
+
+| Entity | Type | Description |
+|--------|------|-------------|
+| `switch.{DEVICE_NAME}_screen` | Switch | Turns the screen and browser on/off |
+| `number.{DEVICE_NAME}_screen_brightness` | Number | Adjusts screen brightness (0–100%) |
+| `button.{DEVICE_NAME}_restart_browser` | Button | Force-restarts the Chromium process |
+| `sensor.{DEVICE_NAME}_pending_updates` | Sensor | Number of pending apt packages |
+| `button.{DEVICE_NAME}_apply_updates` | Button | Triggers `apt-get update && apt-get upgrade` |
+
+> **Note:** After the service first starts, verify the exact entity IDs assigned by HA under Settings → Devices & Services → MQTT, and update any automations accordingly.
 
 ## 🤖 Home Assistant Automation
 To integrate this with your presence sensors, you can use the following automation. This example uses `mode: restart` to ensure the screen reacts immediately to new motion events.
@@ -47,16 +61,16 @@ action:
           - condition: trigger
             id: "motion"
         sequence:
-          - action: light.turn_on
+          - action: switch.turn_on
             target:
-              entity_id: light.pi_dashboard_screen
+              entity_id: switch.pi_dashboard_screen
       - conditions:
           - condition: trigger
             id: "no_motion"
         sequence:
-          - action: light.turn_off
+          - action: switch.turn_off
             target:
-              entity_id: light.pi_dashboard_screen
+              entity_id: switch.pi_dashboard_screen
 mode: restart
 ```
 
@@ -80,13 +94,30 @@ pip install -r requirements.txt
 ```bash
 sudo pip3 install -r requirements.txt --break-system-packages
 ```
+
 ### 3. Create a .env file from the example:
 ```bash
 cp .env.example .env
 vi .env
 ```
+
+#### Key settings:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MQTT_BROKER` | *(required)* | IP or hostname of your MQTT broker |
+| `MQTT_USER` | *(required)* | MQTT username |
+| `MQTT_PASS` | *(required)* | MQTT password |
+| `DEVICE_NAME` | hostname | Name used for all HA entity IDs |
+| `BROWSER_USER` | `pi` | OS user that owns the Wayland session |
+| `BACKLIGHT_PATH` | `/sys/class/backlight/panel_backlight@1` | Sysfs path for your display driver |
+| `BROWSER_PROCESS` | `chromium` | Process name to suspend/resume |
+| `KIOSK_URLS` | `http://localhost` | Comma-separated list of URLs to load |
+| `ENABLE_REMOTE_RESTART` | `true` | Enable the browser restart button entity |
+| `ENABLE_OS_UPDATES` | `true` | Enable the update sensor and apply button |
+
 ### 4. Configure your MQTT broker details and the correct BACKLIGHT_PATH.
-For Trixie/KMS drivers, use: /sys/class/backlight/panel_backlight@1
+For Trixie/KMS drivers, use: `/sys/class/backlight/panel_backlight@1`
+For Legacy drivers, use: `/sys/class/backlight/rpi_backlight`
 
 ### 5. Setup the Systemd Service
 #### Open the service file and replace `YOUR_USERNAME` with your actual Pi username:
