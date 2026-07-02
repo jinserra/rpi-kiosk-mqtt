@@ -3,6 +3,7 @@ import paho.mqtt.client as mqtt
 import json
 import logging
 import os
+import glob
 import subprocess
 import socket
 import threading
@@ -76,7 +77,8 @@ class BrowserManager:
         
         # Clear Locks (Using absolute paths)
         config_dir = f"{self.home_dir}/.config/chromium"
-        subprocess.run(f"rm -rf {config_dir}/Singleton*", shell=True, check=False)
+        for lock_file in glob.glob(f"{config_dir}/Singleton*"):
+            os.unlink(lock_file)
         
         # Reset Preferences
         pref_path = f"{config_dir}/Default/Preferences"
@@ -121,6 +123,7 @@ class SystemManager:
     @staticmethod
     def get_update_count():
         try:
+            subprocess.run(["apt-get", "update", "-qq"], check=True, capture_output=True)
             cmd = "apt-get -s upgrade | grep -P '^\\d+ upgraded' | cut -d' ' -f1"
             result = subprocess.check_output(cmd, shell=True).decode().strip()
             return int(result) if result else 0
@@ -131,6 +134,7 @@ class SystemManager:
     def apply_updates():
         logging.info("Starting OS Update process. This may take a few minutes...")
         try:
+            subprocess.run(["apt-get", "update"], check=True)
             subprocess.run(["apt-get", "upgrade", "-y"], check=True)
             logging.info("OS Updates applied successfully.")
         except subprocess.CalledProcessError as e:
@@ -206,15 +210,24 @@ class KioskController:
             client.subscribe(self.update_topic)
 
     def on_message(self, client, userdata, msg):
-        payload = msg.payload.decode().upper()
-        
-        # Handle Screen Toggle
-        if msg.topic.endswith("/set") and "restart" not in msg.topic and "updates" not in msg.topic:
-            is_on = (payload == "ON")
+        payload = msg.payload.decode()
+
+        # Handle Screen Power
+        if msg.topic == f"{self.base_topic}/set":
+            is_on = (payload.upper() == "ON")
             self.backlight.power = is_on
-            self.browser.manage_state(payload)
-            client.publish(f"{self.base_topic}/state", payload, retain=True)
-            
+            self.browser.manage_state(payload.upper())
+            client.publish(f"{self.base_topic}/state", payload.upper(), retain=True)
+
+        # Handle Brightness
+        elif msg.topic == f"{self.base_topic}/brightness/set":
+            try:
+                brightness = max(0, min(100, int(payload)))
+                self.backlight.brightness = brightness
+                client.publish(f"{self.base_topic}/brightness/state", brightness, retain=True)
+            except ValueError:
+                logging.warning(f"Invalid brightness value: {payload}")
+
         # Handle Remote Restart Trigger
         elif msg.topic == self.restart_topic and ENABLE_REMOTE_RESTART:
             logging.info("Remote browser restart requested.")
